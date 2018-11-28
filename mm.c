@@ -36,11 +36,11 @@
  ********************************************************/
 team_t team = {
   /* Team name */
-  "Jack Beeken",
+  "Beeken",
   /* First member's full name */
-  "beekenj@gmail.com",
+  "Jack Beeken",
   /* First member's email address */
-  "",
+  "beekenj@colorado.edu",
   /* Second member's full name (leave blank if none) */
   "",
   /* Second member's email address (leave blank if none) */
@@ -59,9 +59,7 @@ team_t team = {
 #define DSIZE       8       /* doubleword size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
-// Start my macros
-#define MAX_HEAP    16
-// End
+
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
