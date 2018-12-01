@@ -1,20 +1,20 @@
-/* 
- * mm-implicit.c -  Simple allocator based on implicit free lists, 
- *                  first fit placement, and boundary tag coalescing. 
+/*
+ * mm-implicit.c -  Simple allocator based on implicit free lists,
+ *                  first fit placement, and boundary tag coalescing.
  *
  * Each block has header and footer of the form:
- * 
- *      31                     3  2  1  0 
+ *
+ *      31                     3  2  1  0
  *      -----------------------------------
  *     | s  s  s  s  ... s  s  s  0  0  a/f
- *      ----------------------------------- 
- * 
- * where s are the meaningful size bits and a/f is set 
+ *      -----------------------------------
+ *
+ * where s are the meaningful size bits and a/f is set
  * iff the block is allocated. The list has the following form:
  *
  * begin                                                          end
- * heap                                                           heap  
- *  -----------------------------------------------------------------   
+ * heap                                                           heap
+ *  -----------------------------------------------------------------
  * |  pad   | hdr(8:a) | ftr(8:a) | zero or more usr blks | hdr(8:a) |
  *  -----------------------------------------------------------------
  *          |       prologue      |                       | epilogue |
@@ -55,7 +55,7 @@ team_t team = {
 // make debugging code easier.
 //
 /////////////////////////////////////////////////////////////////////////////
-#define WSIZE       4       /* word size (bytes) */  
+#define WSIZE       4       /* word size (bytes) */
 #define DSIZE       8       /* doubleword size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
@@ -86,7 +86,7 @@ static inline void PUT( void *p, uint32_t val)
 //
 // Read the size and allocated fields from address p
 //
-static inline uint32_t GET_SIZE( void *p )  { 
+static inline uint32_t GET_SIZE( void *p )  {
   return GET(p) & ~0x7;
 }
 
@@ -121,7 +121,7 @@ static inline void* PREV_BLKP(void *bp){
 // Global Variables
 //
 
-static char *heap_listp;  /* pointer to first block */  
+static char *heap_listp;  /* pointer to first block */
 // Start my vars
 
 // End
@@ -133,13 +133,13 @@ static void *extend_heap(uint32_t words);
 static void place(void *bp, uint32_t asize);
 static void *find_fit(uint32_t asize);
 static void *coalesce(void *bp);
-static void printblock(void *bp); 
+static void printblock(void *bp);
 static void checkblock(void *bp);
 
 //
-// mm_init - Initialize the memory manager 
+// mm_init - Initialize the memory manager
 //
-int mm_init(void) 
+int mm_init(void)
 {
   //
   // You need to provide this
@@ -162,9 +162,9 @@ int mm_init(void)
 //
 // extend_heap - Extend heap with free block and return its block pointer
 //
-static void *extend_heap(uint32_t words) 
+static void *extend_heap(uint32_t words)
 {
-  char *bp; 
+  char *bp;
   size_t size;
   /* Allocate an even number of words to maintain alignment */
   size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
@@ -182,15 +182,23 @@ static void *extend_heap(uint32_t words)
 //
 // Practice problem 9.8
 //
-// find_fit - Find a fit for a block with asize bytes 
+// find_fit - Find a fit for a block with asize bytes
 //
 static void *find_fit(uint32_t asize)
 {
-  return NULL; /* no fit */
+  // First-fit search
+  void *bp;
+
+  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+    if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+      return bp;
+    }
+  }
+  return NULL; // No fit
 }
 
-// 
-// mm_free - Free a block 
+//
+// mm_free - Free a block
 //
 void mm_free(void *bp)
 {
@@ -205,7 +213,7 @@ void mm_free(void *bp)
 //
 // coalesce - boundary tag coalescing. Return ptr to coalesced block
 //
-static void *coalesce(void *bp) 
+static void *coalesce(void *bp)
 {
   size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
@@ -238,9 +246,9 @@ static void *coalesce(void *bp)
 }
 
 //
-// mm_malloc - Allocate a block with at least size bytes of payload 
+// mm_malloc - Allocate a block with at least size bytes of payload
 //
-void *mm_malloc(uint32_t size) 
+void *mm_malloc(uint32_t size)
 {
   //
   // You need to provide this
@@ -271,17 +279,31 @@ void *mm_malloc(uint32_t size)
       return NULL;
   place(bp, asize);
   return bp;
-} 
+}
 
 //
 //
 // Practice problem 9.9
 //
-// place - Place block of asize bytes at start of free block bp 
+// place - Place block of asize bytes at start of free block bp
 //         and split if remainder would be at least minimum block size
 //
 static void place(void *bp, uint32_t asize)
 {
+  size_t csize = GET_SIZE(HDRP(bp));
+
+  if ((csize - asize) >= (2*DSIZE)) {
+    PUT(HDRP(bp), PACK(asize, 1));
+    PUT(FTRP(bp), PACK(asize, 1));
+    bp = NEXT_BLKP(bp);
+    PUT(HDRP(bp), PACK(csize-asize, 0));
+    PUT(FTRP(bp), PACK(csize-asize, 0));
+  }
+
+  else {
+    PUT(HDRP(bp), PACK(csize, 1));
+    PUT(FTRP(bp), PACK(csize, 1));
+  }
 }
 
 
@@ -308,9 +330,9 @@ void *mm_realloc(void *ptr, uint32_t size)
 }
 
 //
-// mm_checkheap - Check the heap for consistency 
+// mm_checkheap - Check the heap for consistency
 //
-void mm_checkheap(int verbose) 
+void mm_checkheap(int verbose)
 {
   //
   // This provided implementation assumes you're using the structure
@@ -318,7 +340,7 @@ void mm_checkheap(int verbose)
   // and provide your own mm_checkheap
   //
   void *bp = heap_listp;
-  
+
   if (verbose) {
     printf("Heap (%p):\n", heap_listp);
   }
@@ -334,7 +356,7 @@ void mm_checkheap(int verbose)
     }
     checkblock(bp);
   }
-     
+
   if (verbose) {
     printblock(bp);
   }
@@ -344,27 +366,27 @@ void mm_checkheap(int verbose)
   }
 }
 
-static void printblock(void *bp) 
+static void printblock(void *bp)
 {
   uint32_t hsize, halloc, fsize, falloc;
 
   hsize = GET_SIZE(HDRP(bp));
-  halloc = GET_ALLOC(HDRP(bp));  
+  halloc = GET_ALLOC(HDRP(bp));
   fsize = GET_SIZE(FTRP(bp));
-  falloc = GET_ALLOC(FTRP(bp));  
-    
+  falloc = GET_ALLOC(FTRP(bp));
+
   if (hsize == 0) {
     printf("%p: EOL\n", bp);
     return;
   }
 
   printf("%p: header: [%d:%c] footer: [%d:%c]\n",
-	 bp, 
-	 (int) hsize, (halloc ? 'a' : 'f'), 
-	 (int) fsize, (falloc ? 'a' : 'f')); 
+	 bp,
+	 (int) hsize, (halloc ? 'a' : 'f'),
+	 (int) fsize, (falloc ? 'a' : 'f'));
 }
 
-static void checkblock(void *bp) 
+static void checkblock(void *bp)
 {
   if ((uintptr_t)bp % 8) {
     printf("Error: %p is not doubleword aligned\n", bp);

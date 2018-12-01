@@ -1,1 +1,3 @@
 // ------- Changelog for malloc lab ------- //
+1. Added basic functions from the book
+    mm_init(), extend_heap(), mm_free(), coalesce(), mm_malloc()
