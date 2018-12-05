@@ -123,17 +123,20 @@ static inline void* PREV_BLKP(void *bp){
 //
 
 // static char *heap_listp;  /* pointer to first block */
+// Start my vars
+
+// End
 
 //
 // function prototypes for internal helper routines
 //
 // static void *extend_heap(uint32_t words);
 // static void place(void *bp, uint32_t asize);
+static void *find_fit(uint32_t asize);
 // static void *coalesce(void *bp);
 // static void printblock(void *bp);
 // static void checkblock(void *bp);
 
-static void *find_fit(uint32_t asize);
 void print_heap();
 
 //  single word (4) or double word (8) alignment
@@ -148,7 +151,6 @@ void print_heap();
 
 typedef struct header blockHdr;
 
-// Free list structure
 struct header {
   size_t size;
   blockHdr *next_p;
@@ -160,7 +162,7 @@ struct header {
 //
 int mm_init(void)
 {
-  // Create root node for empty free list
+  // Create the initial empty heap
   blockHdr *bp = mem_sbrk(BLK_HDR_SIZE);
   bp->size = BLK_HDR_SIZE;
   bp->next_p = bp;
@@ -168,15 +170,11 @@ int mm_init(void)
   return 0;
 }
 
-//
-// print_heap - a test routine
-//
 void print_heap()
 {
   blockHdr *bp = mem_heap_lo();
   while (bp < (blockHdr *)mem_heap_hi()) {
-    printf("%s block at %p, size %d\n",
-      (bp->size&1)?"allocated":"free", bp, (int)(bp->size & ~1));
+    printf("%s block at %p, size %d", (bp->size%1)?"allocated":"free", bp, (int)(bp->size));
     bp = (blockHdr *)((char *)bp +(bp->size & ~1));
   }
 }
@@ -186,9 +184,7 @@ void print_heap()
 //
 void *mm_malloc(uint32_t size)
 {
-  // new block size is header + requested size
   int newsize = ALIGN(BLK_HDR_SIZE + size);
-  // Call find_fit to request existing block of newsize
   blockHdr *bp = find_fit(newsize);
   // Did not find block of appropriate size in free list
   if (bp == NULL) {
@@ -198,18 +194,18 @@ void *mm_malloc(uint32_t size)
       return NULL;
     }
     // Initialize block size and set to allocated
-    else
+    else {
       bp->size = newsize | 1;
+    }
   }
-  // Found a fit on the free list
+  // Found a fit!
   else {
     // Mark as allocated
     bp->size |= 1;
-    // Remove from free list
+    // Linked list removal
     bp->prior_p->next_p = bp->next_p;
     bp->next_p->prior_p = bp->prior_p;
   }
-  // Return pointer to the payload
   return (char *)bp + BLK_HDR_SIZE;
 }
 
@@ -219,16 +215,13 @@ void *mm_malloc(uint32_t size)
 static void *find_fit(uint32_t asize)
 {
   blockHdr *bp;
-  // Iterate through free list until end or find block of requested size
+  // Iterate through free list until end or find block of size 'asize'
   for (bp = ((blockHdr *)mem_heap_lo())->next_p;
        bp != mem_heap_lo() && bp->size < asize;
        bp = bp->next_p);
-  // Loop terminates either at a block of requested size, or at begining of free list, if there is no block of requested size <<?>>
-  // Loop has found an appropriate block on the free list <<?>>
+
   if (bp != mem_heap_lo())
     return bp;
-  // There is no appropriate block on the free list <<?>>
-  // calling function must initialize new block <<?>>
   else
     return NULL;
 }
@@ -237,18 +230,16 @@ static void *find_fit(uint32_t asize)
 //
 // mm_free - Free a block
 //
-// ptr is a pointer to the payload of the block we want to free
-void mm_free(void *ptr)
+void mm_free(void *bp)
 {
-  blockHdr *bp = ptr-BLK_HDR_SIZE,
+  blockHdr *ptr = bp-BLK_HDR_SIZE,
            *head = mem_heap_lo();   // Head of free list
-  // Mark as unallocated
-  bp->size &= ~1;
-  // Add block onto the free list
-  bp->next_p          = head->next_p;
-  bp->prior_p         = head;
-  head->next_p        = bp;
-  bp->next_p->prior_p = bp;
+  // Free the block
+  ptr->size &= ~1;
+  ptr->next_p = head->next_p;
+  ptr->prior_p = head;
+  head->next_p = ptr;
+  ptr->next_p->prior_p = ptr;
 }
 
 //
