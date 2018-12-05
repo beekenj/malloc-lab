@@ -79,6 +79,7 @@ static inline uint32_t PACK(uint32_t size, int alloc) {
 // Read and write a word at address p
 //
 static inline uint32_t GET(void *p) { return  *(uint32_t *)p; }
+
 static inline void PUT( void *p, uint32_t val)
 {
   *((uint32_t *)p) = val;
@@ -148,12 +149,33 @@ void print_heap();
 
 typedef struct header blockHdr;
 
-// Free list structure
+// Free list header structure
 struct header {
+  // Contains size of block and allocated bit
   size_t size;
   blockHdr *next_p;
   blockHdr *prior_p;
 };
+
+static inline void set_ftr(blockHdr *bp, int alloc) {
+  PUT(((char *)(bp) + bp->size), PACK(bp->size, alloc));
+}
+
+static inline int ftr_alloc(blockHdr *bp) {
+  return 0; 
+}
+
+// #define BLK_FTR_SIZE ALIGN(sizeof(blockFtr))
+
+// typedef struct footer blockFtr;
+
+// struct footer {
+//   size_t size;
+// };
+
+// static inline void *blockFtr(blockHdr *bp) {
+//   return ((char *)(bp) /*+ BLK_HDR_SIZE*/ + bp->size);
+// }
 
 //
 // mm_init - Initialize the memory manager
@@ -165,6 +187,10 @@ int mm_init(void)
   bp->size = BLK_HDR_SIZE;
   bp->next_p = bp;
   bp->prior_p = bp;
+  set_ftr(bp, 0);
+  // .......
+  // blockFtr *fp = mem_sbrk(BLK_FTR_SIZE);
+  // fp->size = BLK_HDR_SIZE;
   return 0;
 }
 
@@ -190,14 +216,16 @@ void *mm_malloc(uint32_t size)
   int newsize = ALIGN(BLK_HDR_SIZE + size);
   // Call find_fit to request existing block of newsize
   blockHdr *bp = find_fit(newsize);
+
   // Did not find block of appropriate size in free list
   if (bp == NULL) {
+    // Initialize a new block
     bp = mem_sbrk(newsize);
     // Space unavailable
     if ((long)bp == -1) {
       return NULL;
     }
-    // Initialize block size and set to allocated
+    // Assign block size and set to allocated
     else
       bp->size = newsize | 1;
   }
@@ -223,11 +251,12 @@ static void *find_fit(uint32_t asize)
   for (bp = ((blockHdr *)mem_heap_lo())->next_p;
        bp != mem_heap_lo() && bp->size < asize;
        bp = bp->next_p);
-  // Loop terminates either at a block of requested size, or at begining of free list, if there is no block of requested size <<?>>
+  // Loop terminates either at a block of requested size, or at begining of free list, if there is no block of requested size
+
   // Loop has found an appropriate block on the free list <<?>>
   if (bp != mem_heap_lo())
     return bp;
-  // There is no appropriate block on the free list <<?>>
+  // There is no appropriate block on the free list
   // calling function must initialize new block <<?>>
   else
     return NULL;
@@ -244,7 +273,7 @@ void mm_free(void *ptr)
            *head = mem_heap_lo();   // Head of free list
   // Mark as unallocated
   bp->size &= ~1;
-  // Add block onto the free list
+  // Add block to the front of the free list
   bp->next_p          = head->next_p;
   bp->prior_p         = head;
   head->next_p        = bp;
@@ -252,7 +281,7 @@ void mm_free(void *ptr)
 }
 
 //
-// mm_realloc -- implemented for you
+// mm_realloc -- llist implementation
 //
 void *mm_realloc(void *ptr, uint32_t size)
 {
