@@ -136,6 +136,7 @@ static inline void* PREV_BLKP(void *bp){
 
 static void *find_fit(uint32_t asize);
 void ph();
+void ps();
 
 //  single word (4) or double word (8) alignment
 #define ALIGNMENT 8
@@ -159,16 +160,18 @@ struct header {
   blockHdr *prior_p;
 };
 
+//
+// Given block ptr bp, compute address of its header and footer
+//
 static inline void *HDRP(blockHdr *bp) {
-
   return ((char *)(bp));
 }
 static inline void *FTRP(blockHdr *bp) {
-  return ((char *)(bp) + BLK_HDR_SIZE + bp->size);
+  return ((char *)(bp) + (bp->size &~1));
 }
 
+// Sets the size and allocation values in a footer at the end of the block
 static inline void SET_FTR(blockHdr *bp, int alloc) {
-  // PUT(FTRP(bp), PACK(0, 0));
   PUT(FTRP(bp), PACK(bp->size, alloc));
 }
 
@@ -186,6 +189,11 @@ int mm_init(void)
   return 0;
 }
 
+void ps()
+{
+  printf("%d\n", (int)BLK_FTR_SIZE);
+}
+
 //
 // print_heap - a test routine
 //
@@ -195,9 +203,17 @@ void ph()
   while (bp < (blockHdr *)mem_heap_hi()) {
     printf("%s block at %p, size %d\n",
       GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
+    // printf("footer is at %p\n", FTRP(bp));
+    // printf("Footer points to %p\n",
+    // // This should be the syntax for assigning a pointer to the head, from the footer
+    //   (FTRP(bp)-(GET_SIZE(FTRP(bp))+GET_ALLOC(FTRP(bp)))));
+    if (bp != mem_heap_lo()) {
+      // Syntax for accessing the footer of the previous block
+      void *pbp = (void *)bp - BLK_FTR_SIZE;
+      // printf("%p\n", pbp);
+      printf("previous block is %s\n", GET_ALLOC(pbp)?"allocated":"free");
+    }
     bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE);
-    // (int)(bp->size & ~1)
-    // (bp->size&1)
   }
 }
 
