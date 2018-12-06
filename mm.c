@@ -149,6 +149,8 @@ struct header {
 static void *find_fit(uint32_t asize);
 static blockHdr *PREV_BLKP(blockHdr *bp);
 static blockHdr *NEXT_BLKP(blockHdr *bp);
+// static int GET_PREV_ALLOC(blockHdr *bp);
+void extend_blk(blockHdr *bp, size_t size);
 void ph();
 void ps();
 
@@ -180,6 +182,19 @@ static inline void SET_FTR(blockHdr *bp, int alloc) {
   PUT(FTRP(bp), PACK(bp->size, alloc));
 }
 
+// This function needs to return only if not the begining of the heap
+static inline void *GET_PREV_FTR(blockHdr *bp) {
+  return (void *)bp - BLK_FTR_SIZE;
+}
+
+static inline int GET_PREV_ALLOC(blockHdr *bp) {
+  return GET_ALLOC(GET_PREV_FTR(bp));
+}
+
+static inline int GET_NEXT_ALLOC(blockHdr *bp) {
+  return NEXT_BLKP(bp)->size&1;
+}
+
 // Returns a blockHdr pointer to the header of the previous block in memory
 static blockHdr *PREV_BLKP(blockHdr *bp)
 {
@@ -197,12 +212,21 @@ static blockHdr *PREV_BLKP(blockHdr *bp)
 // Returns a blockHdr pointer to the header of the next block in memory
 static blockHdr *NEXT_BLKP(blockHdr *bp)
 {
+  // This should prevent function from pointing past the end of the heap, but...
   if (bp != mem_heap_hi()) {
-    return ((char *)(bp) + bp->size + BLK_FTR_SIZE);
+    // Cast to char* so that the arithemetic works, then cast back to blockHdr* for return
+    return (blockHdr *)((char *)(bp) + (bp->size&~1) + BLK_FTR_SIZE);
   }
   // End of heap
   else
     return NULL;
+}
+
+// Extend the size of block at bp to its original size, plus argument 'size'
+void extend_blk(blockHdr *bp, size_t size)
+{
+  bp->size += size;
+  SET_FTR(bp, bp->size&~1);
 }
 
 //
@@ -212,10 +236,10 @@ int mm_init(void)
 {
   // Create root node for empty free list
   blockHdr *bp = mem_sbrk(BLK_HDR_SIZE + BLK_FTR_SIZE);
-  bp->size = BLK_HDR_SIZE;
+  bp->size = BLK_HDR_SIZE | 1;
   bp->next_p = bp;
   bp->prior_p = bp;
-  SET_FTR(bp, 0);
+  SET_FTR(bp, 1);
   return 0;
 }
 
@@ -233,7 +257,8 @@ void ph()
   while (bp < (blockHdr *)mem_heap_hi()) {
     printf("%s block at %p, size %d\n",
       GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
-      printf("next block is at %p\n", NEXT_BLKP(bp));
+      // printf("next block is at %p\n", NEXT_BLKP(bp));
+      printf("next block is %s\n", GET_NEXT_ALLOC(bp)?"allocated":"free");
     // printf("footer is at %p\n", FTRP(bp));
     // printf("Footer points to %p\n",
     // // This should be the syntax for assigning a pointer to the head, from the footer

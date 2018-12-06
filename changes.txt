@@ -4,9 +4,12 @@
 2. Implemented basic linked list free list
 3. Implemented footer
 4. Reworked inline functions HDRP and FTRP for llist implementation
+5. Reworked NEXT_BLKP() and PREV_BLKP() for llist implementation
+6. Added GET_PREV_FTR(), GET_PREV_ALLOC(), GET_NEXT_ALLOC(), and extend_blk() functions,
+	will be used in coallecing routine
 // ---------------- To Do ------------------//
-1. footer
-2. splitting
-3. coallecing
-4. header pointer
+x1. footer
+2. coallecing
+3. splitting
+x4. header pointer
 5. red-black tree
