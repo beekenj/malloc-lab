@@ -36,7 +36,7 @@
  ********************************************************/
 team_t team = {
   /* Team name */
-  "Beeken",
+  "JLB",
   /* First member's full name */
   "Jack Beeken",
   /* First member's email address */
@@ -99,13 +99,13 @@ static inline int GET_ALLOC( void *p  ) {
 //
 // Given block ptr bp, compute address of its header and footer
 //
-static inline void *HDRP(void *bp) {
+// static inline void *HDRP(void *bp) {
 
-  return ( (char *)bp) - WSIZE;
-}
-static inline void *FTRP(void *bp) {
-  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE);
-}
+//   return ( (char *)bp) - WSIZE;
+// }
+// static inline void *FTRP(void *bp) {
+//   return ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE);
+// }
 
 //
 // Given block ptr bp, compute address of next and previous blocks
@@ -135,7 +135,7 @@ static inline void* PREV_BLKP(void *bp){
 // static void checkblock(void *bp);
 
 static void *find_fit(uint32_t asize);
-void print_heap();
+void ph();
 
 //  single word (4) or double word (8) alignment
 #define ALIGNMENT 8
@@ -147,35 +147,30 @@ void print_heap();
 
 #define BLK_HDR_SIZE ALIGN(sizeof(blockHdr))
 
+#define BLK_FTR_SIZE ALIGN(sizeof(void *))
+
 typedef struct header blockHdr;
 
 // Free list header structure
 struct header {
-  // Contains size of block and allocated bit
+  // Contains size of block, and allocated bit
   size_t size;
   blockHdr *next_p;
   blockHdr *prior_p;
 };
 
-static inline void set_ftr(blockHdr *bp, int alloc) {
-  PUT(((char *)(bp) + bp->size), PACK(bp->size, alloc));
+static inline void *HDRP(blockHdr *bp) {
+
+  return ((char *)(bp));
+}
+static inline void *FTRP(blockHdr *bp) {
+  return ((char *)(bp) + BLK_HDR_SIZE + bp->size);
 }
 
-static inline int ftr_alloc(blockHdr *bp) {
-  return 0; 
+static inline void SET_FTR(blockHdr *bp, int alloc) {
+  // PUT(FTRP(bp), PACK(0, 0));
+  PUT(FTRP(bp), PACK(bp->size, alloc));
 }
-
-// #define BLK_FTR_SIZE ALIGN(sizeof(blockFtr))
-
-// typedef struct footer blockFtr;
-
-// struct footer {
-//   size_t size;
-// };
-
-// static inline void *blockFtr(blockHdr *bp) {
-//   return ((char *)(bp) /*+ BLK_HDR_SIZE*/ + bp->size);
-// }
 
 //
 // mm_init - Initialize the memory manager
@@ -183,27 +178,26 @@ static inline int ftr_alloc(blockHdr *bp) {
 int mm_init(void)
 {
   // Create root node for empty free list
-  blockHdr *bp = mem_sbrk(BLK_HDR_SIZE);
+  blockHdr *bp = mem_sbrk(BLK_HDR_SIZE + BLK_FTR_SIZE);
   bp->size = BLK_HDR_SIZE;
   bp->next_p = bp;
   bp->prior_p = bp;
-  set_ftr(bp, 0);
-  // .......
-  // blockFtr *fp = mem_sbrk(BLK_FTR_SIZE);
-  // fp->size = BLK_HDR_SIZE;
+  SET_FTR(bp, 0);
   return 0;
 }
 
 //
 // print_heap - a test routine
 //
-void print_heap()
+void ph()
 {
   blockHdr *bp = mem_heap_lo();
   while (bp < (blockHdr *)mem_heap_hi()) {
     printf("%s block at %p, size %d\n",
-      (bp->size&1)?"allocated":"free", bp, (int)(bp->size & ~1));
-    bp = (blockHdr *)((char *)bp +(bp->size & ~1));
+      GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
+    bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE);
+    // (int)(bp->size & ~1)
+    // (bp->size&1)
   }
 }
 
@@ -220,19 +214,22 @@ void *mm_malloc(uint32_t size)
   // Did not find block of appropriate size in free list
   if (bp == NULL) {
     // Initialize a new block
-    bp = mem_sbrk(newsize);
+    bp = mem_sbrk(newsize + BLK_FTR_SIZE);
     // Space unavailable
     if ((long)bp == -1) {
       return NULL;
     }
     // Assign block size and set to allocated
-    else
+    else {
       bp->size = newsize | 1;
+      SET_FTR(bp, 1);
+    }
   }
   // Found a fit on the free list
   else {
     // Mark as allocated
     bp->size |= 1;
+    SET_FTR(bp, 1);
     // Remove from free list
     bp->prior_p->next_p = bp->next_p;
     bp->next_p->prior_p = bp->prior_p;
@@ -273,6 +270,7 @@ void mm_free(void *ptr)
            *head = mem_heap_lo();   // Head of free list
   // Mark as unallocated
   bp->size &= ~1;
+  SET_FTR(bp, 0);
   // Add block to the front of the free list
   bp->next_p          = head->next_p;
   bp->prior_p         = head;

@@ -6,4 +6,5 @@
 1. footer
 2. splitting
 3. coallecing
-4. red-black tree
+4. header pointer
+5. red-black tree
