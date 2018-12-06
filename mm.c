@@ -110,13 +110,13 @@ static inline int GET_ALLOC( void *p  ) {
 //
 // Given block ptr bp, compute address of next and previous blocks
 //
-static inline void *NEXT_BLKP(void *bp) {
-  return  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)));
-}
+// static inline void *NEXT_BLKP(void *bp) {
+//   return  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)));
+// }
 
-static inline void* PREV_BLKP(void *bp){
-  return  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)));
-}
+// static inline void* PREV_BLKP(void *bp){
+//   return  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)));
+// }
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -133,8 +133,22 @@ static inline void* PREV_BLKP(void *bp){
 // static void *coalesce(void *bp);
 // static void printblock(void *bp);
 // static void checkblock(void *bp);
+typedef struct header blockHdr;
 
+// Free list header structure
+struct header {
+  // Contains size of block, and allocated bit
+  size_t size;
+  blockHdr *next_p;
+  blockHdr *prior_p;
+};
+
+//
+// function prototypes for internal helper routines
+//
 static void *find_fit(uint32_t asize);
+static blockHdr *PREV_BLKP(blockHdr *bp);
+static blockHdr *NEXT_BLKP(blockHdr *bp);
 void ph();
 void ps();
 
@@ -150,15 +164,6 @@ void ps();
 
 #define BLK_FTR_SIZE ALIGN(sizeof(void *))
 
-typedef struct header blockHdr;
-
-// Free list header structure
-struct header {
-  // Contains size of block, and allocated bit
-  size_t size;
-  blockHdr *next_p;
-  blockHdr *prior_p;
-};
 
 //
 // Given block ptr bp, compute address of its header and footer
@@ -173,6 +178,31 @@ static inline void *FTRP(blockHdr *bp) {
 // Sets the size and allocation values in a footer at the end of the block
 static inline void SET_FTR(blockHdr *bp, int alloc) {
   PUT(FTRP(bp), PACK(bp->size, alloc));
+}
+
+// Returns a blockHdr pointer to the header of the previous block in memory
+static blockHdr *PREV_BLKP(blockHdr *bp)
+{
+  // At least the second block on the heap (avoids seg fault)
+  if (bp != mem_heap_lo()) {
+    // Pointer to the footer of the previous block in memory
+    void *pftr = (void *)bp - BLK_FTR_SIZE;
+    return (pftr - GET_SIZE(pftr));
+  }
+  // Begining of heap
+  else
+    return NULL;
+}
+
+// Returns a blockHdr pointer to the header of the next block in memory
+static blockHdr *NEXT_BLKP(blockHdr *bp)
+{
+  if (bp != mem_heap_hi()) {
+    return ((char *)(bp) + bp->size + BLK_FTR_SIZE);
+  }
+  // End of heap
+  else
+    return NULL;
 }
 
 //
@@ -203,16 +233,17 @@ void ph()
   while (bp < (blockHdr *)mem_heap_hi()) {
     printf("%s block at %p, size %d\n",
       GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
+      printf("next block is at %p\n", NEXT_BLKP(bp));
     // printf("footer is at %p\n", FTRP(bp));
     // printf("Footer points to %p\n",
     // // This should be the syntax for assigning a pointer to the head, from the footer
     //   (FTRP(bp)-(GET_SIZE(FTRP(bp))+GET_ALLOC(FTRP(bp)))));
-    if (bp != mem_heap_lo()) {
+    // if (bp != mem_heap_lo()) {
       // Syntax for accessing the footer of the previous block
-      void *pbp = (void *)bp - BLK_FTR_SIZE;
+      // void *pbp = (void *)bp - BLK_FTR_SIZE;
       // printf("%p\n", pbp);
-      printf("previous block is %s\n", GET_ALLOC(pbp)?"allocated":"free");
-    }
+      // printf("previous block is %s\n", GET_ALLOC(pbp)?"allocated":"free");
+    // }
     bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE);
   }
 }
@@ -311,6 +342,8 @@ void *mm_realloc(void *ptr, uint32_t size)
   mm_free(ptr);
   return newptr;
 }
+
+
 
 //
 // extend_heap - Extend heap with free block and return its block pointer
