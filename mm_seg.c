@@ -130,7 +130,6 @@ static inline int GET_ALLOC( void *p  ) {
 //
 // static void *extend_heap(uint32_t words);
 // static void place(void *bp, uint32_t asize);
-// static void *coalesce(void *bp);
 // static void printblock(void *bp);
 // static void checkblock(void *bp);
 typedef struct header blockHdr;
@@ -146,13 +145,16 @@ struct header {
 //
 // function prototypes for internal helper routines
 //
+static void *coalesce(void *bp);
 static void *find_fit(uint32_t asize);
+static int GET_NEXT_ALLOC(blockHdr *bp);
 static blockHdr *PREV_BLKP(blockHdr *bp);
 static blockHdr *NEXT_BLKP(blockHdr *bp);
 // static int GET_PREV_ALLOC(blockHdr *bp);
 void extend_blk(blockHdr *bp, size_t size);
 void ph();
-void ps();
+void endh();
+void endf();
 
 //  single word (4) or double word (8) alignment
 #define ALIGNMENT 8
@@ -187,12 +189,18 @@ static inline void *GET_PREV_FTR(blockHdr *bp) {
   return (void *)bp - BLK_FTR_SIZE;
 }
 
+// Returns true if previous block is marked allocated
 static inline int GET_PREV_ALLOC(blockHdr *bp) {
   return GET_ALLOC(GET_PREV_FTR(bp));
 }
 
-static inline int GET_NEXT_ALLOC(blockHdr *bp) {
-  return NEXT_BLKP(bp)->size&1;
+// Returns true if next block is marked allocated
+static int GET_NEXT_ALLOC(blockHdr *bp) {
+  if (NEXT_BLKP(bp) == NULL) {
+    return 1;
+  }
+  else
+    return NEXT_BLKP(bp)->size&1;
 }
 
 // Returns a blockHdr pointer to the header of the previous block in memory
@@ -213,9 +221,9 @@ static blockHdr *PREV_BLKP(blockHdr *bp)
 static blockHdr *NEXT_BLKP(blockHdr *bp)
 {
   // This should prevent function from pointing past the end of the heap, but...
-  if (bp != mem_heap_hi()) {
+  if ((FTRP(bp) + BLK_FTR_SIZE + DSIZE) <= mem_heap_hi()) {
     // Cast to char* so that the arithemetic works, then cast back to blockHdr* for return
-    return (blockHdr *)((char *)(bp) + (bp->size&~1) + BLK_FTR_SIZE);
+    return (blockHdr *)((char *)(bp) + (bp->size&~1) + BLK_FTR_SIZE + DSIZE);
   }
   // End of heap
   else
@@ -235,7 +243,7 @@ void extend_blk(blockHdr *bp, size_t size)
 int mm_init(void)
 {
   // Create root node for empty free list
-  blockHdr *bp = mem_sbrk(BLK_HDR_SIZE + BLK_FTR_SIZE);
+  blockHdr *bp = mem_sbrk(BLK_HDR_SIZE + BLK_FTR_SIZE + DSIZE);
   bp->size = BLK_HDR_SIZE | 1;
   bp->next_p = bp;
   bp->prior_p = bp;
@@ -243,9 +251,19 @@ int mm_init(void)
   return 0;
 }
 
-void ps()
+void endh()
 {
-  printf("%d\n", (int)BLK_FTR_SIZE);
+  printf("%p\n", (void *)mem_heap_hi());
+}
+
+void endf()
+{
+  blockHdr *bp = mem_heap_lo();
+  while (bp < (blockHdr *)mem_heap_hi()){
+    printf("end of block %p\n", (FTRP(bp) + BLK_FTR_SIZE));
+    bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE + DSIZE);
+  }
+    printf("End of heap %p\n", (void *)mem_heap_hi());
 }
 
 //
@@ -257,8 +275,9 @@ void ph()
   while (bp < (blockHdr *)mem_heap_hi()) {
     printf("%s block at %p, size %d\n",
       GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
-      // printf("next block is at %p\n", NEXT_BLKP(bp));
-      printf("next block is %s\n", GET_NEXT_ALLOC(bp)?"allocated":"free");
+    printf("next block is at %p\n", NEXT_BLKP(bp));
+    // printf("end of block %p\n", (FTRP(bp) + BLK_FTR_SIZE));
+    // printf("next block is %s\n", GET_NEXT_ALLOC(bp)?"allocated":"free");
     // printf("footer is at %p\n", FTRP(bp));
     // printf("Footer points to %p\n",
     // // This should be the syntax for assigning a pointer to the head, from the footer
@@ -269,7 +288,7 @@ void ph()
       // printf("%p\n", pbp);
       // printf("previous block is %s\n", GET_ALLOC(pbp)?"allocated":"free");
     // }
-    bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE);
+    bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE + DSIZE);
   }
 }
 
@@ -286,7 +305,7 @@ void *mm_malloc(uint32_t size)
   // Did not find block of appropriate size in free list
   if (bp == NULL) {
     // Initialize a new block
-    bp = mem_sbrk(newsize + BLK_FTR_SIZE);
+    bp = mem_sbrk(newsize + BLK_FTR_SIZE + DSIZE);
     // Space unavailable
     if ((long)bp == -1) {
       return NULL;
@@ -343,6 +362,7 @@ void mm_free(void *ptr)
   // Mark as unallocated
   bp->size &= ~1;
   SET_FTR(bp, 0);
+  coalesce(bp);
   // Add block to the front of the free list
   bp->next_p          = head->next_p;
   bp->prior_p         = head;
@@ -366,6 +386,39 @@ void *mm_realloc(void *ptr, uint32_t size)
   memcpy(newptr, ptr, copySize);
   mm_free(ptr);
   return newptr;
+}
+
+//
+// coalesce - boundary tag coalescing. Return ptr to coalesced block
+//
+static void *coalesce(void *bp)
+{
+  // Case 1: prev and next allocated
+  if (GET_NEXT_ALLOC(bp) && GET_PREV_ALLOC(bp))
+    return bp;
+
+  // Case 2: prev allocated, next free
+  if (!GET_NEXT_ALLOC(bp) && GET_PREV_ALLOC(bp)) {
+    extend_blk(bp, (NEXT_BLKP(bp)->size + BLK_FTR_SIZE + DSIZE));
+    return bp;
+  }
+
+  // Case 3: prev free, next allocated
+  if (GET_NEXT_ALLOC(bp) && !GET_PREV_ALLOC(bp)) {
+    bp = PREV_BLKP(bp);
+    extend_blk(bp, (NEXT_BLKP(bp)->size + BLK_FTR_SIZE + DSIZE));
+    return bp;
+  }
+
+  // Case 4: next and prev free
+  if (!GET_NEXT_ALLOC(bp) && !GET_PREV_ALLOC(bp)) {
+    bp = PREV_BLKP(bp);
+    extend_blk(bp, (NEXT_BLKP(bp)->size + BLK_FTR_SIZE + DSIZE));
+    extend_blk(bp, (NEXT_BLKP(bp)->size + BLK_FTR_SIZE + DSIZE));
+    return bp;
+  }
+
+  return bp;
 }
 
 
@@ -471,7 +524,7 @@ void *mm_realloc(void *ptr, uint32_t size)
 //   }
 
 //   if ((GET_SIZE(HDRP(heap_listp)) != DSIZE) || !GET_ALLOC(HDRP(heap_listp))) {
-//  printf("Bad prologue header\n");
+// 	printf("Bad prologue header\n");
 //   }
 //   checkblock(heap_listp);
 
@@ -506,9 +559,9 @@ void *mm_realloc(void *ptr, uint32_t size)
 //   }
 
 //   printf("%p: header: [%d:%c] footer: [%d:%c]\n",
-//   bp,
-//   (int) hsize, (halloc ? 'a' : 'f'),
-//   (int) fsize, (falloc ? 'a' : 'f'));
+// 	 bp,
+// 	 (int) hsize, (halloc ? 'a' : 'f'),
+// 	 (int) fsize, (falloc ? 'a' : 'f'));
 // }
 
 // static void checkblock(void *bp)
@@ -520,3 +573,4 @@ void *mm_realloc(void *ptr, uint32_t size)
 //     printf("Error: header does not match footer\n");
 //   }
 // }
+
