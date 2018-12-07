@@ -263,7 +263,7 @@ void endf()
     printf("end of block %p\n", (FTRP(bp) + BLK_FTR_SIZE));
     bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE + DSIZE);
   }
-    printf("End of heap %p\n", (void *)mem_heap_hi());
+  printf("End of heap %p\n", (void *)mem_heap_hi());
 }
 
 //
