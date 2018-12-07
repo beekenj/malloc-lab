@@ -167,7 +167,7 @@ static void *coalesce(blockHdr *bp);
 
 #define BLK_HDR_SIZE ALIGN(sizeof(blockHdr))
 
-#define BLK_FTR_SIZE ALIGN(sizeof(void *))
+#define BLK_FTR_SIZE ALIGN(sizeof(void *) + DSIZE)
 
 
 //
@@ -177,7 +177,7 @@ static inline void *HDRP(blockHdr *bp) {
   return ((char *)(bp));
 }
 static inline void *FTRP(blockHdr *bp) {
-  return ((char *)(bp) + (bp->size &~1));
+  return ((char *)(bp) + (bp->size &~1) - DSIZE);
   // return ((char *)(bp) + (bp->size));
 }
 
@@ -251,7 +251,7 @@ int mm_init(void)
   // Create root node for empty free list
   blockHdr *bp = mem_sbrk(BLK_HDR_SIZE + BLK_FTR_SIZE);
   // bp->size = BLK_HDR_SIZE | 1;
-  bp->size = PACK(BLK_HDR_SIZE, 1);
+  bp->size = PACK(BLK_HDR_SIZE + BLK_FTR_SIZE, 1);
   bp->next_p = bp;
   bp->prior_p = bp;
   SET_FTR(bp, 1);
@@ -362,7 +362,7 @@ void mm_free(void *ptr)
   // Mark as unallocated
   bp->size &= ~1;
   SET_FTR(bp, 0);
-  coalesce(bp);
+  // coalesce(bp);
   // Add block to the front of the free list
   bp->next_p          = head->next_p;
   bp->prior_p         = head;
