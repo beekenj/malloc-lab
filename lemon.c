@@ -60,6 +60,44 @@ team_t team = {
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+#define BLK_HDR_SIZE ALIGN(sizeof(blockHdr))
+
+typedef struct header blockHdr;
+
+// Free list header structure
+struct header {
+  blockHdr *bp = mem_sbrk(BLK_HDR_SIZE);
+  blockHdr *next;
+  blockHdr *prev;
+};
+
+void FL_init(blockHdr *bp)
+{
+  bp->next = bp;
+  bp->prev = bp;
+}
+
+// bp should be the root of the free list to add newbp to front of list
+static void push(blockHdr *bp, blockHdr *newbp)
+{
+  newbp->next = bp->next;
+  newbp->prev = bp;
+  bp->next = newbp;
+  newbp->next->prev = newbp;
+}
+
+static void pop(blockHdr *bp)
+{
+  bp->prev->next = bp->next;
+  bp->next->prev = bp->prev;
+  bp->next = NULL;
+  bp->prev = NULL;
+}
+
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
@@ -122,8 +160,11 @@ static inline void* PREV_BLKP(void *bp){
 //
 
 static char *heap_listp;  /* pointer to first block */
+
 // Start my vars
 
+// Declare the free list structure
+blockHdr free_list;
 // End
 
 //
@@ -141,15 +182,20 @@ static void checkblock(void *bp);
 //
 int mm_init(void)
 {
-  //
-  // You need to provide this
-  //
+  // Initialize the free list
+  // Remove this function later and make explicit in mm_init
+  FL_init(&free_list);
+
   // Create the initial empty heap
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) return 1;
-  PUT(heap_listp, 0);                                           // Alignment Padding
-  PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));                  // Prologue header
-  PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));                  // Prologue footer
-  PUT(heap_listp + (3*WSIZE), PACK(0, 1));                  // Epilogue header
+  // Alignment Padding
+  PUT(heap_listp, 0);
+  // Prologue header
+  PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+  // Prologue footer
+  PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+  // Epilogue header
+  PUT(heap_listp + (3*WSIZE), PACK(0, 1));
   heap_listp += (2*WSIZE);
 
   // Extend the empty heap with a free block of CHUNKSIZE bytes
@@ -166,35 +212,42 @@ static void *extend_heap(uint32_t words)
 {
   char *bp;
   size_t size;
+
   /* Allocate an even number of words to maintain alignment */
   size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
+
   if ((long)(bp = mem_sbrk(size)) == -1)
       return NULL;
-  /* Initialize free block header/footer and the epilouge header*/
-  PUT(HDRP(bp), PACK(size,0)); /* Free block header */
-  PUT(FTRP(bp), PACK(size,0)); /* Free block footer */
-  PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1)); /* New Epilouge header */
-  /* Coalesce if the previous block was free */
+
+  // Initialize free block header/footer and the epilouge header
+  // Free block header
+  PUT(HDRP(bp), PACK(size,0));
+  // Free block footer
+  PUT(FTRP(bp), PACK(size,0));
+  // Nrew epilogue header
+  PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
+
+  // Coalesce if the previous block was free
   return coalesce(bp);
 }
 
 
-//
-// Practice problem 9.8
 //
 // find_fit - Find a fit for a block with asize bytes
 //
 static void *find_fit(uint32_t asize)
 {
   // First-fit search
-  void *bp;
-
-  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-    if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+  blockHdr *bp;
+  // Iterate through free list until loop back to root, or find block of requested size
+  for (bp = free_list.next; bp != &free_list; bp = bp->next) {
+    if (asize <= GET_SIZE(HDRP(bp)))
+      // Loop has found an appropriate block on the free list
       return bp;
-    }
   }
-  return NULL; // No fit
+  // There is no appropriate block on the free list
+  // calling function must initialize new block
+  return NULL;
 }
 
 //
@@ -215,32 +268,53 @@ void mm_free(void *bp)
 //
 static void *coalesce(void *bp)
 {
-  size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-  size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+  // Needed for list removals
+  blockHdr *nextb = NEXT_BLKP(bp);
+  blockHdr *prevb = PREV_BLKP(bp);
+
+  size_t prev_alloc = GET_ALLOC(FTRP(prevb));
+  size_t next_alloc = GET_ALLOC(HDRP(nextb));
   size_t size = GET_SIZE(HDRP(bp));
 
-  if (prev_alloc && next_alloc) {         // Case 1
-      return bp;
+  // Case 1: Previous block and next block both allocated
+  if (prev_alloc && next_alloc) {
+      push(&free_list, bp);
+      // return bp;
   }
 
-  else if (prev_alloc && !next_alloc) {   // Case 2
+  // Case 2: Previous block allocated, next block free
+  else if (prev_alloc && !next_alloc) {
+
+      //
+      pop(nextb);
+      push(&free_list, bp);
+
+
       size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
       PUT(HDRP(bp), PACK(size, 0));
       PUT(FTRP(bp), PACK(size, 0));
   }
 
-  else if (!prev_alloc && next_alloc) {   // Case 3
+  // Case 3: Previous block free, next block allocated
+  else if (!prev_alloc && next_alloc) {
       size += GET_SIZE(HDRP(PREV_BLKP(bp)));
       PUT(FTRP(bp), PACK(size, 0));
       PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-      bp = PREV_BLKP(bp);
+
+      // Previous blockHdr will be list node for this block
+      bp = prevb;
   }
 
-  else {                                  // Case 4
+  // Case 4: Previous block and next block both free
+  else {
       size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+
+      //
+      pop(nextb);
       PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
       PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
-      bp = PREV_BLKP(bp);
+      // Previous blockHdr will be list node for this block, and the next
+      bp = prevb;
   }
   return bp;
 }
@@ -265,6 +339,7 @@ void *mm_malloc(uint32_t size)
   if (size <= DSIZE)
       asize = 2*DSIZE;
   else
+      // ------------------------------------------
       asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
 
   // Search the free list for a fit
@@ -281,9 +356,7 @@ void *mm_malloc(uint32_t size)
   return bp;
 }
 
-//
-//
-// Practice problem 9.9
+
 //
 // place - Place block of asize bytes at start of free block bp
 //         and split if remainder would be at least minimum block size
@@ -292,15 +365,22 @@ static void place(void *bp, uint32_t asize)
 {
   size_t csize = GET_SIZE(HDRP(bp));
 
+  // Split case
   if ((csize - asize) >= (2*DSIZE)) {
+    // Remove from free list
+    pop(bp);
     PUT(HDRP(bp), PACK(asize, 1));
     PUT(FTRP(bp), PACK(asize, 1));
     bp = NEXT_BLKP(bp);
     PUT(HDRP(bp), PACK(csize-asize, 0));
     PUT(FTRP(bp), PACK(csize-asize, 0));
+    // Add remainder back to free list
+    push(&free_list, bp);
   }
 
   else {
+    // Remove from free list
+    pop(bp);
     PUT(HDRP(bp), PACK(csize, 1));
     PUT(FTRP(bp), PACK(csize, 1));
   }

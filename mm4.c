@@ -60,6 +60,47 @@ team_t team = {
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
+//  single word (4) or double word (8) alignment
+#define ALIGNMENT 8
+
+// Rounds up to the nearest multiple of ALIGNMENT
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+#define BLK_HDR_SIZE ALIGN(sizeof(blockHdr))
+
+typedef struct header blockHdr;
+
+// Free list header structure
+struct header {
+  // blockHdr *bp = mem_sbrk(BLK_HDR_SIZE);
+  blockHdr *next;
+  blockHdr *prev;
+};
+
+// void FL_init(blockHdr *bp)
+// {
+//   bp->next = bp;
+//   bp->prev = bp;
+// }
+
+// bp should be the root of the free list to add newbp to front of list
+static void push(blockHdr *bp, blockHdr *newbp)
+{
+  newbp->next = bp->next;
+  newbp->prev = bp;
+  bp->next = newbp;
+  newbp->next->prev = newbp;
+}
+
+static void pop(blockHdr *bp)
+{
+  bp->prev->next = bp->next;
+  bp->next->prev = bp->prev;
+  bp->next = NULL;
+  bp->prev = NULL;
+}
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
@@ -122,8 +163,9 @@ static inline void* PREV_BLKP(void *bp){
 //
 
 static char *heap_listp;  /* pointer to first block */
-// Start my vars
 
+// Start my vars
+blockHdr *free_list;
 // End
 
 //
@@ -141,9 +183,12 @@ static void checkblock(void *bp);
 //
 int mm_init(void)
 {
-  //
-  // You need to provide this
-  //
+
+  // Initialize empty free list
+  free_list = mem_sbrk(BLK_HDR_SIZE);
+  free_list->next = free_list;
+  free_list->prev = free_list;
+
   // Create the initial empty heap
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) return 1;
   PUT(heap_listp, 0);                                           // Alignment Padding
@@ -187,26 +232,33 @@ static void *extend_heap(uint32_t words)
 static void *find_fit(uint32_t asize)
 {
   // First-fit search
-  void *bp;
-
-  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-    if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+  blockHdr *bp;
+  // Iterate through free list until loop back to root, or find block of requested size
+  for (bp = free_list->next; bp != free_list; bp = bp->next) {
+    if ((bp != free_list) && (asize <= GET_SIZE(HDRP(bp))))
+      // Loop has found an appropriate block on the free list
       return bp;
-    }
   }
-  return NULL; // No fit
+  // There is no appropriate block on the free list
+  // calling function must initialize new block
+  return NULL;
 }
 
 //
 // mm_free - Free a block
 //
-void mm_free(void *bp)
+void mm_free(void *ptr)
 {
-  size_t size = GET_SIZE(HDRP(bp));
+  blockHdr *bp = ptr;
 
-  PUT(HDRP(bp), PACK(size, 0));
-  PUT(FTRP(bp), PACK(size, 0));
-  coalesce(bp);
+  size_t size = GET_SIZE(HDRP(ptr));
+
+  PUT(HDRP(ptr), PACK(size, 0));
+  PUT(FTRP(ptr), PACK(size, 0));
+
+  push(free_list, bp);
+
+  // coalesce(bp);
 
 }
 
@@ -215,29 +267,44 @@ void mm_free(void *bp)
 //
 static void *coalesce(void *bp)
 {
+  blockHdr *ptr = bp;
+  blockHdr *nextb = NEXT_BLKP(bp);
+  // blockHdr *prevb = PREV_BLKP(bp);
+
   size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HDRP(bp));
 
-  if (prev_alloc && next_alloc) {         // Case 1
+  // Case 1: Previous block and next block both allocated
+  if (prev_alloc && next_alloc) {
+      push(free_list, ptr);
       return bp;
   }
 
-  else if (prev_alloc && !next_alloc) {   // Case 2
+  // Case 2: Previous block allocated, next block free
+  else if (prev_alloc && !next_alloc) {
+
+      pop(nextb);
+      push(free_list, ptr);
+
       size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
       PUT(HDRP(bp), PACK(size, 0));
       PUT(FTRP(bp), PACK(size, 0));
   }
 
-  else if (!prev_alloc && next_alloc) {   // Case 3
+  // Case 3: Previous block free, next block allocated
+  else if (!prev_alloc && next_alloc) {
       size += GET_SIZE(HDRP(PREV_BLKP(bp)));
       PUT(FTRP(bp), PACK(size, 0));
       PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
       bp = PREV_BLKP(bp);
   }
 
-  else {                                  // Case 4
+  // Case 4: Previous block and next block both free
+  else {
       size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+
+      pop(nextb);
       PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
       PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
       bp = PREV_BLKP(bp);
