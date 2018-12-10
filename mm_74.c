@@ -173,9 +173,8 @@ void endf();
 void ph(int x);
 void ps();
 void fl();
-void sb(blockHdr *bp);
 static void *coalesce(blockHdr *bp);
-static void place(blockHdr *bp, uint32_t asize);
+static void split(blockHdr *bp, uint32_t asize);
 
 //  single word (4) or double word (8) alignment
 #define ALIGNMENT 8
@@ -323,14 +322,8 @@ void fl()
        bp != mem_heap_lo();
        bp = bp->next) {
     printf("%s block at %p, size %d\n",
-      GET_ALLOC(FTRP(bp))?"allocated":"free", bp, 1);
+      GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp)));
   }
-}
-
-void sb(blockHdr *bp)
-{
-  printf("%s block at %p, size %d\n",
-      (bp->size&1)?"allocated":"free", bp, (int)(bp->size)-DSIZE);
 }
 
 //
@@ -360,7 +353,7 @@ void *mm_malloc(uint32_t size)
   }
   // Found a fit on the free list
   else {
-    place(bp, size);
+    split(bp, size);
     // // Mark as allocated
     // bp->size |= 1;
     // SET_FTR(bp, 1);
@@ -371,7 +364,7 @@ void *mm_malloc(uint32_t size)
   return (char *)bp + DSIZE;
 }
 
-static void place(blockHdr *bp, uint32_t asize)
+static void split(blockHdr *bp, uint32_t asize)
 {
   // Get free list head pointer
   blockHdr *head = mem_heap_lo();
@@ -380,7 +373,7 @@ static void place(blockHdr *bp, uint32_t asize)
   int newsize = ALIGN(DSIZE + asize);
   int splitsize = ALIGN(csize - newsize - BLK_FTR_SIZE);
 
-  if ((csize - asize) >= FOVERHEAD && splitsize >= FOVERHEAD + 1) {
+  if ((csize - asize) >= FOVERHEAD) {
     // Remove bp from free list
     pop(bp);
     // Shrink bp to newsize and allocate
@@ -445,7 +438,7 @@ void mm_free(void *ptr)
 //
 void *mm_realloc(void *ptr, uint32_t size)
 {
-  blockHdr *bp = ptr-BLK_HDR_SIZE;
+  blockHdr *bp = ptr-BLK_HDR_SIZE;        //Problem
   void *newptr = mm_malloc(size);
   // Ignore spurious input
   if (newptr == NULL)

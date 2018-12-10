@@ -167,6 +167,7 @@ static void *find_fit(uint32_t asize);
 static blockHdr *PREV_BLKP(blockHdr *bp);
 static blockHdr *NEXT_BLKP(blockHdr *bp);
 static int GET_NEXT_ALLOC(blockHdr *bp);
+static int GET_NEXT_SIZE(blockHdr *bp);
 // static int GET_PREV_ALLOC(blockHdr *bp);
 void extend_blk(blockHdr *bp, size_t size);
 void endf();
@@ -215,10 +216,6 @@ static inline int GET_PREV_ALLOC(blockHdr *bp) {
   return GET_ALLOC(GET_PREV_FTR(bp));
 }
 
-// static inline int GET_NEXT_ALLOC(blockHdr *bp) {
-//   return NEXT_BLKP(bp)->size&1;
-// }
-
 // Returns true if next block is marked allocated
 static int GET_NEXT_ALLOC(blockHdr *bp) {
   if (NEXT_BLKP(bp) == NULL) {
@@ -226,6 +223,19 @@ static int GET_NEXT_ALLOC(blockHdr *bp) {
   }
   else
     return NEXT_BLKP(bp)->size&1;
+}
+
+// Returns true if next block is marked allocated
+static int GET_NEXT_SIZE(blockHdr *bp) {
+  if (NEXT_BLKP(bp) == NULL) {
+    return 0;
+  }
+  else
+    return NEXT_BLKP(bp)->size;
+}
+
+static int GET_PREV_SIZE(blockHdr *bp) {
+  return GET_SIZE(GET_PREV_FTR(bp))-DSIZE;
 }
 
 // Returns a blockHdr pointer to the header of the previous block in memory
@@ -311,6 +321,8 @@ void ph(int x)
       printf("footer is at %p\n", FTRP(bp));
     else if (x == 4)
       printf("previous block is at %p\n", PREV_BLKP(bp));
+    else if (x == 5)
+      printf("previous block is %d\n", GET_PREV_SIZE(bp));
     bp = (blockHdr *)((char *)bp +(bp->size & ~1) + BLK_FTR_SIZE);
   }
   printf("----------------------------------------------------\n");
@@ -323,7 +335,7 @@ void fl()
        bp != mem_heap_lo();
        bp = bp->next) {
     printf("%s block at %p, size %d\n",
-      GET_ALLOC(FTRP(bp))?"allocated":"free", bp, 1);
+      GET_ALLOC(FTRP(bp))?"allocated":"free", bp, GET_SIZE(FTRP(bp))-DSIZE);
   }
 }
 
@@ -431,12 +443,10 @@ static void *find_fit(uint32_t asize)
 void mm_free(void *ptr)
 {
   blockHdr *bp = ptr-DSIZE;
-  // blockHdr *head = mem_heap_lo();   // Head of free list
   // Mark as unallocated
   bp->size &= ~1;
   SET_FTR(bp, 0);
-  // Add block to the front of the free list
-  // push(head, bp);
+  // Coalesce will join adjacent free blocks and add to the free list
   coalesce(bp);
 }
 
@@ -445,17 +455,57 @@ void mm_free(void *ptr)
 //
 void *mm_realloc(void *ptr, uint32_t size)
 {
-  blockHdr *bp = ptr-BLK_HDR_SIZE;
-  void *newptr = mm_malloc(size);
-  // Ignore spurious input
-  if (newptr == NULL)
-    return NULL;
-  int copySize = bp->size-BLK_HDR_SIZE;
-  if (size < copySize)
-    copySize = size;
-  memcpy(newptr, ptr, copySize);
-  mm_free(ptr);
-  return newptr;
+  // Set ptr to the head of the block
+  blockHdr *bp = ptr-DSIZE;
+
+  blockHdr *nextb = NEXT_BLKP(bp);
+  blockHdr *prevb = PREV_BLKP(bp);
+
+  // prev allocated, next free
+  if ((!GET_NEXT_ALLOC(bp) && GET_PREV_ALLOC(bp)) &&
+     (GET_NEXT_SIZE(bp) + bp->size) >= size) {
+    extend_blk(bp, (NEXT_BLKP(bp)->size + BLK_FTR_SIZE));
+    pop(nextb);
+    return bp;
+  }
+
+  // prev free, next allocated
+  else if ((GET_NEXT_ALLOC(bp) && !GET_PREV_ALLOC(bp)) &&
+          (GET_PREV_SIZE(bp) + bp->size) >= size) {
+    extend_blk(prevb, (NEXT_BLKP(prevb)->size + BLK_FTR_SIZE));
+    int copySize = bp->size-DSIZE;
+    if (size < copySize)
+      copySize = size;
+    memcpy((prevb + DSIZE), ptr, copySize);
+    return prevb;
+  }
+
+  // next and prev free
+  else if ((!GET_NEXT_ALLOC(bp) && !GET_PREV_ALLOC(bp)) &&
+          (GET_PREV_SIZE(bp) + bp->size) >= size) {
+    extend_blk(prevb, (NEXT_BLKP(prevb)->size + BLK_FTR_SIZE));
+    extend_blk(prevb, (NEXT_BLKP(prevb)->size + BLK_FTR_SIZE));
+    int copySize = bp->size-DSIZE;
+    if (size < copySize)
+      copySize = size;
+    memcpy((prevb + DSIZE), ptr, copySize);
+    pop(nextb);
+    return prevb;
+  }
+
+  // prev and next allocated
+  else {
+    void *newptr = mm_malloc(size);
+    // Ignore spurious input
+    if (newptr == NULL)
+      return NULL;
+    int copySize = bp->size-DSIZE;
+    if (size < copySize)
+      copySize = size;
+    memcpy(newptr, ptr, copySize);
+    mm_free(ptr);
+    return newptr;
+  }
 }
 
 //

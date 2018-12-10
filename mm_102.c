@@ -445,7 +445,7 @@ void mm_free(void *ptr)
 //
 void *mm_realloc(void *ptr, uint32_t size)
 {
-  blockHdr *bp = ptr-BLK_HDR_SIZE;
+  blockHdr *bp = ptr-DSIZE;
   void *newptr = mm_malloc(size);
   // Ignore spurious input
   if (newptr == NULL)
